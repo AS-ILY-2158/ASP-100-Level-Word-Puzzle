@@ -1,20 +1,15 @@
 
 "use strict";
 
-/* =========================================
+/* =====================================================
    ASP 100 LEVEL WORD PUZZLE
-   Main Game Engine
-   ========================================= */
+   Main Game Engine - Revised Version
+   ===================================================== */
 
 const DATA_FILE = "./JavaScript/levels.json";
 const SAVE_KEY = "ASP_WORD_PUZZLE_SAVE_V1";
 
 const $ = (id) => document.getElementById(id);
-
-const screens = {
-    welcome: $("welcome-screen"),
-    game: $("game-screen")
-};
 
 let levels = [];
 let currentLevelIndex = 0;
@@ -41,20 +36,43 @@ let progress = {
 };
 
 
-/* =========================================
-   DATA NORMALIZATION
-   Supports database field names
-   ========================================= */
+/* =====================================================
+   DATA HELPERS
+   ===================================================== */
 
 function getField(obj, name) {
-    if (!obj) return undefined;
+    if (!obj || typeof obj !== "object") return undefined;
 
     const key = Object.keys(obj).find(
-        k => k.toLowerCase() === name.toLowerCase()
+        item => item.toLowerCase() === name.toLowerCase()
     );
 
     return key ? obj[key] : undefined;
 }
+
+
+function normalizeOptions(value) {
+    if (Array.isArray(value)) {
+        return value.map(letter =>
+            String(letter).trim().toUpperCase()
+        );
+    }
+
+    const raw = String(value || "").trim();
+
+    if (!raw) return [];
+
+    // Supports space-separated letters: A B C
+    if (/\s/.test(raw)) {
+        return raw.split(/\s+/)
+            .filter(Boolean)
+            .map(letter => letter.toUpperCase());
+    }
+
+    // Supports compact letters: ABC
+    return [...raw.toUpperCase()];
+}
+
 
 function normalizeLevel(item) {
     const word = String(
@@ -65,30 +83,30 @@ function normalizeLevel(item) {
         getField(item, "Puzzle_Pattern") || ""
     ).toUpperCase().trim();
 
-    let options = getField(item, "Letter_Options");
-
-    if (Array.isArray(options)) {
-        options = options.map(v => String(v).toUpperCase());
-    } else {
-        options = String(options || "")
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean)
-            .map(v => v.toUpperCase());
-    }
+    const options = normalizeOptions(
+        getField(item, "Letter_Options")
+    );
 
     return {
         number: Number(getField(item, "Level_Number")),
-        name: getField(item, "Level_Name") || "Word Challenge",
-        phase: getField(item, "Phase_Name") || "Beginner",
-        phaseNumber: getField(item, "Phase_ID") || "PH-01",
+        name: String(
+            getField(item, "Level_Name") || "Word Challenge"
+        ),
+        phase: String(
+            getField(item, "Phase_Name") || "Beginner"
+        ),
+        phaseNumber: String(
+            getField(item, "Phase_ID") || "PH-01"
+        ),
         word,
         pattern,
         missing: String(
             getField(item, "Missing_Letters") || ""
         ).toUpperCase().trim(),
         options,
-        hint: getField(item, "Hint") || "Complete the missing letters.",
+        hint: String(
+            getField(item, "Hint") || "Complete the missing letters."
+        ),
         targetTime: Number(
             getField(item, "Target_Time_Seconds") || 90
         )
@@ -96,16 +114,26 @@ function normalizeLevel(item) {
 }
 
 
-/* =========================================
+/* =====================================================
    LOAD LEVEL DATABASE
-   ========================================= */
+   ===================================================== */
 
 async function loadLevels() {
+    const startButton = $("start-game-btn");
+
+    if (startButton) {
+        startButton.disabled = true;
+    }
+
     try {
-        const response = await fetch(DATA_FILE);
+        const response = await fetch(DATA_FILE, {
+            cache: "no-store"
+        });
 
         if (!response.ok) {
-            throw new Error("Level database could not be loaded.");
+            throw new Error(
+                `Database loading failed: HTTP ${response.status}`
+            );
         }
 
         const data = await response.json();
@@ -114,30 +142,47 @@ async function loadLevels() {
             ? data
             : data.levels || data.Levels || data.data || [];
 
+        if (!Array.isArray(rawLevels)) {
+            throw new Error("Invalid level database format.");
+        }
+
         levels = rawLevels.map(normalizeLevel);
 
         validateDatabase();
-
         loadSavedProgress();
 
-        $("start-game-btn").disabled = false;
+        if (startButton) {
+            startButton.disabled = false;
+        }
 
-        console.log("ASP Game Engine Ready:", levels.length, "Levels");
+        const errorElement = $("name-error");
+
+        if (errorElement) {
+            errorElement.textContent = "";
+        }
+
+        console.log(
+            "ASP Game Engine Ready:",
+            levels.length,
+            "Levels"
+        );
 
     } catch (error) {
-        console.error(error);
+        console.error("Game loading error:", error);
 
-        $("name-error").textContent =
-            "Level database is missing or invalid. Please check levels.json.";
+        const errorElement = $("name-error");
 
-        $("start-game-btn").disabled = true;
+        if (errorElement) {
+            errorElement.textContent =
+                "Game database is missing or invalid. Please check JavaScript/levels.json.";
+        }
     }
 }
 
 
-/* =========================================
+/* =====================================================
    DATABASE VALIDATION
-   ========================================= */
+   ===================================================== */
 
 function validateDatabase() {
     if (levels.length !== 100) {
@@ -147,26 +192,70 @@ function validateDatabase() {
     }
 
     levels.forEach((level, index) => {
+        const levelNumber = index + 1;
+
+        if (level.number !== levelNumber) {
+            throw new Error(
+                `Level numbering error at level ${levelNumber}.`
+            );
+        }
+
         if (!level.word || !level.pattern || !level.options.length) {
-            throw new Error(`Invalid data at level ${index + 1}.`);
+            throw new Error(
+                `Missing data at level ${levelNumber}.`
+            );
         }
 
         if (level.word.length !== level.pattern.length) {
-            throw new Error(`Pattern length error at level ${index + 1}.`);
+            throw new Error(
+                `Pattern length error at level ${levelNumber}.`
+            );
         }
 
         if (level.options.length !== level.word.length) {
-            throw new Error(`Letter option count error at level ${index + 1}.`);
+            throw new Error(
+                `Letter option count error at level ${levelNumber}.`
+            );
         }
 
         if (level.options.some(letter => letter.length !== 1)) {
-            throw new Error(`Invalid letter tile at level ${index + 1}.`);
+            throw new Error(
+                `Invalid letter tile at level ${levelNumber}.`
+            );
         }
 
-        const blankCount = (level.pattern.match(/_/g) || []).length;
+        if (level.options.some(letter => !/^[A-Z]$/.test(letter))) {
+            throw new Error(
+                `Invalid character in options at level ${levelNumber}.`
+            );
+        }
 
-        if (blankCount !== level.missing.length) {
-            throw new Error(`Missing letter count error at level ${index + 1}.`);
+        const blankPositions = [];
+
+        [...level.pattern].forEach((character, position) => {
+            if (character === "_") {
+                blankPositions.push(position);
+            } else if (character !== level.word[position]) {
+                throw new Error(
+                    `Fixed letter mismatch at level ${levelNumber}.`
+                );
+            }
+        });
+
+        if (blankPositions.length !== level.missing.length) {
+            throw new Error(
+                `Missing letter count error at level ${levelNumber}.`
+            );
+        }
+
+        const expectedMissing = blankPositions
+            .map(position => level.word[position])
+            .join("");
+
+        if (expectedMissing !== level.missing) {
+            throw new Error(
+                `Missing letters do not match the answer at level ${levelNumber}.`
+            );
         }
 
         const available = [...level.options];
@@ -176,46 +265,73 @@ function validateDatabase() {
 
             if (position === -1) {
                 throw new Error(
-                    `Missing correct option at level ${index + 1}.`
+                    `Correct letter option missing at level ${levelNumber}.`
                 );
             }
 
             available.splice(position, 1);
         }
+
+        if (!Number.isFinite(level.targetTime) || level.targetTime <= 0) {
+            throw new Error(
+                `Invalid target time at level ${levelNumber}.`
+            );
+        }
     });
 }
 
 
-/* =========================================
+/* =====================================================
    LOCAL STORAGE
-   ========================================= */
+   ===================================================== */
 
 function loadSavedProgress() {
     try {
-        const saved = JSON.parse(
-            localStorage.getItem(SAVE_KEY)
-        );
+        const rawSaved = localStorage.getItem(SAVE_KEY);
 
-        if (!saved) return;
+        if (!rawSaved) return;
 
-        playerName = saved.playerName || "";
+        const saved = JSON.parse(rawSaved);
+
+        if (!saved || typeof saved !== "object") return;
+
+        playerName = String(saved.playerName || "");
 
         progress = {
             unlockedLevel: Math.min(
                 100,
                 Math.max(1, Number(saved.unlockedLevel) || 1)
             ),
-            completedLevels: saved.completedLevels || {},
-            bestTimes: saved.bestTimes || {},
-            totalPoints: Number(saved.totalPoints) || 0
+            completedLevels:
+                saved.completedLevels &&
+                typeof saved.completedLevels === "object"
+                    ? saved.completedLevels
+                    : {},
+            bestTimes:
+                saved.bestTimes &&
+                typeof saved.bestTimes === "object"
+                    ? saved.bestTimes
+                    : {},
+            totalPoints: Math.max(
+                0,
+                Number(saved.totalPoints) || 0
+            )
         };
 
-        $("player-name").value = playerName;
+        const nameInput = $("player-name");
+
+        if (nameInput) {
+            nameInput.value = playerName;
+        }
 
     } catch (error) {
-        console.warn("Saved progress could not be loaded.", error);
+        console.warn(
+            "Saved progress could not be loaded:",
+            error
+        );
     }
 }
+
 
 function saveProgress() {
     const saveData = {
@@ -232,14 +348,17 @@ function saveProgress() {
             JSON.stringify(saveData)
         );
     } catch (error) {
-        console.warn("Progress could not be saved.", error);
+        console.warn(
+            "Progress could not be saved:",
+            error
+        );
     }
 }
 
 
-/* =========================================
+/* =====================================================
    SCREEN MANAGEMENT
-   ========================================= */
+   ===================================================== */
 
 function showScreen(screenId) {
     document.querySelectorAll(".screen").forEach(screen => {
@@ -248,16 +367,29 @@ function showScreen(screenId) {
 
     const target = $(screenId);
 
-    if (target) target.classList.add("active");
+    if (target) {
+        target.classList.add("active");
+    }
 }
+
 
 function showOverlay(overlayId) {
-    $(overlayId).classList.remove("hidden");
+    const overlay = $(overlayId);
+
+    if (overlay) {
+        overlay.classList.remove("hidden");
+    }
 }
 
+
 function hideOverlay(overlayId) {
-    $(overlayId).classList.add("hidden");
+    const overlay = $(overlayId);
+
+    if (overlay) {
+        overlay.classList.add("hidden");
+    }
 }
+
 
 function hideAllOverlays() {
     document.querySelectorAll(".overlay").forEach(overlay => {
@@ -266,20 +398,35 @@ function hideAllOverlays() {
 }
 
 
-/* =========================================
+/* =====================================================
    PLAYER START
-   ========================================= */
+   ===================================================== */
 
 function startGame() {
-    const enteredName = $("player-name").value.trim();
+    const nameInput = $("player-name");
+    const errorElement = $("name-error");
+
+    if (!nameInput) return;
+
+    const enteredName = nameInput.value.trim();
 
     if (!enteredName) {
-        $("name-error").textContent = "Please enter your name.";
-        $("player-name").focus();
+        if (errorElement) {
+            errorElement.textContent = "Please enter your name.";
+        }
+
+        nameInput.focus();
         return;
     }
 
-    if (!levels.length) return;
+    if (!levels.length) {
+        if (errorElement) {
+            errorElement.textContent =
+                "Game levels are not loaded yet.";
+        }
+
+        return;
+    }
 
     playerName = enteredName;
 
@@ -291,9 +438,9 @@ function startGame() {
 }
 
 
-/* =========================================
+/* =====================================================
    LEVEL INITIALIZATION
-   ========================================= */
+   ===================================================== */
 
 function beginLevel(index) {
     if (index < 0 || index >= levels.length) return;
@@ -311,33 +458,54 @@ function beginLevel(index) {
 
     elapsedSeconds = 0;
 
-    selectedValues = [];
-    selectedTileIndices = [];
+    const blankCount = (level.pattern.match(/_/g) || []).length;
+
+    selectedValues = Array(blankCount).fill(null);
+    selectedTileIndices = Array(blankCount).fill(null);
 
     gamePaused = false;
     gameStarted = true;
 
-    $("display-player-name").textContent = playerName;
+    if ($("display-player-name")) {
+        $("display-player-name").textContent = playerName;
+    }
 
-    $("phase-name").textContent =
-        `${level.phaseNumber} · ${level.phase}`;
+    if ($("phase-name")) {
+        $("phase-name").textContent =
+            `${level.phaseNumber} · ${level.phase}`;
+    }
 
-    $("level-title").textContent =
-        `LEVEL ${String(level.number).padStart(2, "0")}`;
+    if ($("level-title")) {
+        $("level-title").textContent =
+            `LEVEL ${String(level.number).padStart(2, "0")}`;
+    }
 
-    $("level-name").textContent = level.name;
+    if ($("level-name")) {
+        $("level-name").textContent = level.name;
+    }
 
-    $("level-hint").textContent = level.hint;
+    if ($("level-hint")) {
+        $("level-hint").textContent = level.hint;
+    }
 
-    $("game-feedback").textContent = "";
+    if ($("game-feedback")) {
+        $("game-feedback").textContent = "";
+        $("game-feedback").className = "feedback-message";
+    }
 
-    $("hint-btn").disabled = false;
+    if ($("hint-btn")) {
+        $("hint-btn").disabled = false;
+    }
 
-    $("progress-text").textContent =
-        `${level.number} / 100`;
+    if ($("progress-text")) {
+        $("progress-text").textContent =
+            `${level.number} / 100`;
+    }
 
-    $("progress-bar").style.width =
-        `${level.number}%`;
+    if ($("progress-bar")) {
+        $("progress-bar").style.width =
+            `${level.number}%`;
+    }
 
     updateTimer();
     updateHearts();
@@ -350,28 +518,32 @@ function beginLevel(index) {
 }
 
 
-/* =========================================
+/* =====================================================
    PUZZLE RENDERING
-   ========================================= */
+   ===================================================== */
 
 function getBlankPositions() {
     const level = levels[currentLevelIndex];
 
+    if (!level) return [];
+
     const positions = [];
 
     [...level.pattern].forEach((character, index) => {
-        if (character === "_") positions.push(index);
+        if (character === "_") {
+            positions.push(index);
+        }
     });
 
     return positions;
 }
 
+
 function renderPuzzle() {
     const level = levels[currentLevelIndex];
-
-    const positions = getBlankPositions();
-
     const container = $("word-pattern");
+
+    if (!level || !container) return;
 
     container.innerHTML = "";
 
@@ -384,17 +556,21 @@ function renderPuzzle() {
         slot.className = "letter-slot";
 
         if (character === "_") {
-            slot.dataset.blankIndex = blankIndex;
+            const currentBlank = blankIndex;
+
+            slot.dataset.blankIndex = currentBlank;
 
             slot.textContent =
-                selectedValues[blankIndex] || "";
+                selectedValues[currentBlank] || "";
 
-            if (selectedValues[blankIndex]) {
+            if (selectedValues[currentBlank]) {
                 slot.classList.add("filled");
             }
 
+            slot.disabled = !gameStarted || gamePaused;
+
             slot.addEventListener("click", () => {
-                removeLetter(blankIndex);
+                removeLetter(currentBlank);
             });
 
             blankIndex++;
@@ -410,14 +586,15 @@ function renderPuzzle() {
 }
 
 
-/* =========================================
+/* =====================================================
    LETTER OPTIONS
-   ========================================= */
+   ===================================================== */
 
 function renderOptions() {
     const level = levels[currentLevelIndex];
-
     const container = $("letter-options");
+
+    if (!level || !container) return;
 
     container.innerHTML = "";
 
@@ -432,8 +609,9 @@ function renderOptions() {
 
         if (isUsed) {
             tile.classList.add("selected");
-            tile.disabled = true;
         }
+
+        tile.disabled = isUsed || !gameStarted || gamePaused;
 
         tile.addEventListener("click", () => {
             selectLetter(index);
@@ -443,8 +621,15 @@ function renderOptions() {
     });
 }
 
+
 function selectLetter(tileIndex) {
+    if (!gameStarted || gamePaused) return;
+
     if (selectedTileIndices.includes(tileIndex)) return;
+
+    const level = levels[currentLevelIndex];
+
+    if (!level || !level.options[tileIndex]) return;
 
     const blankIndex = selectedValues.findIndex(
         value => value === null || value === undefined
@@ -452,7 +637,7 @@ function selectLetter(tileIndex) {
 
     if (blankIndex === -1) return;
 
-    const letter = levels[currentLevelIndex].options[tileIndex];
+    const letter = level.options[tileIndex];
 
     selectedValues[blankIndex] = letter;
     selectedTileIndices[blankIndex] = tileIndex;
@@ -461,7 +646,10 @@ function selectLetter(tileIndex) {
     renderOptions();
 }
 
+
 function removeLetter(blankIndex) {
+    if (!gameStarted || gamePaused) return;
+
     if (!selectedValues[blankIndex]) return;
 
     selectedValues[blankIndex] = null;
@@ -471,23 +659,30 @@ function removeLetter(blankIndex) {
     renderOptions();
 }
 
+
 function resetWord() {
-    selectedValues = [];
-    selectedTileIndices = [];
+    if (!gameStarted || gamePaused) return;
+
+    const blankCount = getBlankPositions().length;
+
+    selectedValues = Array(blankCount).fill(null);
+    selectedTileIndices = Array(blankCount).fill(null);
 
     renderPuzzle();
     renderOptions();
 
-    $("game-feedback").textContent = "";
+    showFeedback("", "");
 }
 
 
-/* =========================================
+/* =====================================================
    ANSWER VALIDATION
-   ========================================= */
+   ===================================================== */
 
 function buildAnswer() {
     const level = levels[currentLevelIndex];
+
+    if (!level) return "";
 
     let blankIndex = 0;
     let answer = "";
@@ -504,19 +699,25 @@ function buildAnswer() {
     return answer.toUpperCase();
 }
 
+
 function checkWord() {
+    if (!gameStarted || gamePaused) return;
+
     const level = levels[currentLevelIndex];
+
+    if (!level) return;
 
     const blankCount = getBlankPositions().length;
 
     if (
-        selectedValues.length < blankCount ||
+        selectedValues.length !== blankCount ||
         selectedValues.some(value => !value)
     ) {
         showFeedback(
             "Complete all missing letters first.",
             "warning"
         );
+
         return;
     }
 
@@ -524,38 +725,46 @@ function checkWord() {
 
     if (answer === level.word) {
         completeLevel();
+
     } else {
         wrongAttempts++;
-
         hearts--;
 
         updateHearts();
 
         if (hearts <= 0) {
             gameOver();
+
         } else {
             showFeedback(
-                `Incorrect answer. ${hearts} ${hearts === 1 ? "heart" : "hearts"} remaining.`,
+                `Incorrect answer. ${hearts} ${
+                    hearts === 1 ? "heart" : "hearts"
+                } remaining.`,
                 "error"
             );
         }
     }
 }
 
+
 function showFeedback(message, type) {
     const feedback = $("game-feedback");
 
+    if (!feedback) return;
+
     feedback.textContent = message;
-    feedback.className = `feedback-message ${type}`;
+    feedback.className = `feedback-message ${type || ""}`;
 }
 
 
-/* =========================================
+/* =====================================================
    HEARTS
-   ========================================= */
+   ===================================================== */
 
 function updateHearts() {
     const container = $("hearts-container");
+
+    if (!container) return;
 
     container.innerHTML = "";
 
@@ -572,31 +781,46 @@ function updateHearts() {
 }
 
 
-/* =========================================
+/* =====================================================
    HINT SYSTEM
    Reveals the next missing letter.
-   ========================================= */
+   ===================================================== */
 
 function useHint() {
+    if (!gameStarted || gamePaused) return;
+
     if (hintUsed) {
-        showFeedback("You have already used your hint.", "warning");
+        showFeedback(
+            "You have already used your hint.",
+            "warning"
+        );
+
         return;
     }
 
-    const blankCount = getBlankPositions().length;
+    const level = levels[currentLevelIndex];
+
+    if (!level) return;
 
     const blankIndex = selectedValues.findIndex(
         value => value === null || value === undefined
     );
 
     if (blankIndex === -1) {
-        showFeedback("All letters are already filled.", "warning");
+        showFeedback(
+            "All letters are already filled.",
+            "warning"
+        );
+
         return;
     }
 
-    const correctLetter = levels[currentLevelIndex].missing[blankIndex];
+    const blankPositions = getBlankPositions();
+    const wordPosition = blankPositions[blankIndex];
 
-    const availableIndex = levels[currentLevelIndex].options.findIndex(
+    const correctLetter = level.word[wordPosition];
+
+    const availableIndex = level.options.findIndex(
         (letter, index) =>
             letter === correctLetter &&
             !selectedTileIndices.includes(index)
@@ -604,37 +828,35 @@ function useHint() {
 
     selectedValues[blankIndex] = correctLetter;
 
-    if (availableIndex !== -1) {
-        selectedTileIndices[blankIndex] = availableIndex;
-    } else {
-        selectedTileIndices[blankIndex] = null;
-    }
+    selectedTileIndices[blankIndex] =
+        availableIndex !== -1 ? availableIndex : null;
 
     hintUsed = true;
 
-    $("hint-btn").disabled = true;
+    if ($("hint-btn")) {
+        $("hint-btn").disabled = true;
+    }
 
     renderPuzzle();
     renderOptions();
 
-    showFeedback("One missing letter has been revealed.", "success");
+    showFeedback(
+        "One missing letter has been revealed.",
+        "success"
+    );
 }
 
 
-/* =========================================
+/* =====================================================
    TIMER
    Elapsed stopwatch, not countdown.
-   ========================================= */
+   ===================================================== */
 
 function startTimer() {
     stopTimer();
 
     timerInterval = setInterval(() => {
-        if (
-            !gameStarted ||
-            gamePaused ||
-            !$("settings-screen").classList.contains("hidden")
-        ) {
+        if (!gameStarted || gamePaused) {
             return;
         }
 
@@ -645,31 +867,40 @@ function startTimer() {
     }, 1000);
 }
 
+
 function stopTimer() {
-    if (timerInterval) {
+    if (timerInterval !== null) {
         clearInterval(timerInterval);
         timerInterval = null;
     }
 }
 
+
 function updateTimer() {
     const minutes = Math.floor(elapsedSeconds / 60);
     const seconds = elapsedSeconds % 60;
 
-    $("game-timer").textContent =
-        `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    const timer = $("game-timer");
+
+    if (timer) {
+        timer.textContent =
+            `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
 }
 
 
-/* =========================================
+/* =====================================================
    STAR CALCULATION
-   ========================================= */
+   ===================================================== */
 
 function calculateStars() {
     const level = levels[currentLevelIndex];
 
+    if (!level) return 0;
+
     const target = level.targetTime;
 
+    // Three stars: fast, no mistakes, no hint.
     if (
         elapsedSeconds <= target &&
         wrongAttempts === 0 &&
@@ -678,15 +909,17 @@ function calculateStars() {
         return 3;
     }
 
+    // Hint usage can never earn more than two stars.
     if (
         elapsedSeconds <= target * 1.6 &&
         wrongAttempts <= 1
     ) {
-        return hintUsed ? 2 : 2;
+        return 2;
     }
 
-    return hearts > 0 ? 1 : 0;
+    return 1;
 }
+
 
 function calculatePoints(stars) {
     return (
@@ -697,11 +930,13 @@ function calculatePoints(stars) {
 }
 
 
-/* =========================================
+/* =====================================================
    LEVEL COMPLETION
-   ========================================= */
+   ===================================================== */
 
 function completeLevel() {
+    if (!gameStarted) return;
+
     stopTimer();
 
     gameStarted = false;
@@ -709,17 +944,22 @@ function completeLevel() {
     const level = levels[currentLevelIndex];
 
     const stars = calculateStars();
-
     const points = calculatePoints(stars);
 
     const key = String(level.number);
 
     const oldResult = progress.completedLevels[key] || {};
 
+    const oldPoints = Number(oldResult.points) || 0;
+    const oldStars = Number(oldResult.stars) || 0;
+
+    // Keep the best result for this level.
     progress.completedLevels[key] = {
-        stars: Math.max(stars, oldResult.stars || 0),
-        time: elapsedSeconds,
-        points: Math.max(points, oldResult.points || 0)
+        stars: Math.max(stars, oldStars),
+        time: !oldResult.time
+            ? elapsedSeconds
+            : Math.min(elapsedSeconds, oldResult.time),
+        points: Math.max(points, oldPoints)
     };
 
     const oldBest = progress.bestTimes[key];
@@ -728,7 +968,8 @@ function completeLevel() {
         progress.bestTimes[key] = elapsedSeconds;
     }
 
-    progress.totalPoints += points;
+    // Add only the improvement, preventing replay point farming.
+    progress.totalPoints += Math.max(0, points - oldPoints);
 
     progress.unlockedLevel = Math.max(
         progress.unlockedLevel,
@@ -737,61 +978,89 @@ function completeLevel() {
 
     saveProgress();
 
-    $("success-player-name").textContent =
-        `Well done, ${playerName}!`;
+    if ($("success-player-name")) {
+        $("success-player-name").textContent =
+            `Well done, ${playerName}!`;
+    }
 
-    $("earned-stars").textContent =
-        "★ ".repeat(stars) + "☆ ".repeat(3 - stars);
+    if ($("earned-stars")) {
+        $("earned-stars").textContent =
+            "★ ".repeat(stars) + "☆ ".repeat(3 - stars);
+    }
 
-    $("result-time").textContent =
-        $("game-timer").textContent;
+    if ($("result-time")) {
+        $("result-time").textContent =
+            $("game-timer")
+                ? $("game-timer").textContent
+                : "00:00";
+    }
 
-    $("result-hearts").textContent = hearts;
+    if ($("result-hearts")) {
+        $("result-hearts").textContent = hearts;
+    }
 
-    $("result-mistakes").textContent = wrongAttempts;
+    if ($("result-mistakes")) {
+        $("result-mistakes").textContent = wrongAttempts;
+    }
 
-    $("result-points").textContent = points;
+    if ($("result-points")) {
+        $("result-points").textContent = points;
+    }
 
-    $("next-level-btn").textContent =
-        level.number === 100 ? "FINISH GAME" : "NEXT LEVEL";
+    if ($("next-level-btn")) {
+        $("next-level-btn").textContent =
+            level.number === 100 ? "FINISH GAME" : "NEXT LEVEL";
 
-    $("next-level-btn").disabled = false;
+        $("next-level-btn").disabled = false;
+    }
 
     showOverlay("success-screen");
 }
 
 
-/* =========================================
+/* =====================================================
    GAME OVER
-   ========================================= */
+   ===================================================== */
 
 function gameOver() {
     stopTimer();
 
     gameStarted = false;
 
-    $("game-over-message").textContent =
-        `You used all three hearts on Level ${levels[currentLevelIndex].number}.`;
+    const message = $("game-over-message");
+
+    if (message) {
+        message.textContent =
+            `You used all three hearts on Level ${levels[currentLevelIndex].number}.`;
+    }
 
     showOverlay("game-over-screen");
 }
 
 
-/* =========================================
+/* =====================================================
    RETRY AND NEXT LEVEL
-   ========================================= */
+   ===================================================== */
 
 function retryLevel() {
     beginLevel(currentLevelIndex);
 }
 
+
 function nextLevel() {
     if (currentLevelIndex >= 99) {
         stopTimer();
+
+        gameStarted = false;
+
         hideAllOverlays();
 
-        $("info-content").textContent =
-            `Congratulations ${playerName}! You completed all 100 levels.`;
+        const message = $("info-content");
+
+        if (message) {
+            message.textContent =
+                `Congratulations ${playerName}! You completed all 100 levels.`;
+        }
 
         showOverlay("info-screen");
 
@@ -802,9 +1071,9 @@ function nextLevel() {
 }
 
 
-/* =========================================
+/* =====================================================
    MAIN MENU
-   ========================================= */
+   ===================================================== */
 
 function goToMainMenu() {
     stopTimer();
@@ -814,50 +1083,78 @@ function goToMainMenu() {
 
     hideAllOverlays();
 
-    $("player-name").value = playerName;
+    if ($("player-name")) {
+        $("player-name").value = playerName;
+    }
 
-    $("name-error").textContent = "";
+    if ($("name-error")) {
+        $("name-error").textContent = "";
+    }
 
     showScreen("welcome-screen");
 }
 
 
-/* =========================================
+/* =====================================================
    SETTINGS
-   ========================================= */
+   ===================================================== */
 
 function openSettings() {
+    if (!gameStarted || gamePaused) return;
+
     gamePaused = true;
+
     showOverlay("settings-screen");
+
+    renderPuzzle();
+    renderOptions();
 }
+
 
 function closeSettings() {
     hideOverlay("settings-screen");
+
     gamePaused = false;
+
+    if (gameStarted) {
+        renderPuzzle();
+        renderOptions();
+    }
 }
+
 
 function restartCurrentLevel() {
     hideOverlay("settings-screen");
+
     beginLevel(currentLevelIndex);
 }
 
 
-/* =========================================
+/* =====================================================
    INFORMATION BUTTONS
-   ========================================= */
+   ===================================================== */
 
 function openInformation(message) {
-    $("info-content").textContent = message;
+    const content = $("info-content");
+
+    if (content) {
+        content.textContent = message;
+    }
+
     showOverlay("info-screen");
 }
 
 
-/* =========================================
+/* =====================================================
    KEYBOARD SUPPORT
-   ========================================= */
+   ===================================================== */
 
 document.addEventListener("keydown", event => {
     if (!gameStarted || gamePaused) return;
+
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+    }
 
     const key = event.key.toUpperCase();
 
@@ -876,60 +1173,91 @@ document.addEventListener("keydown", event => {
     }
 
     if (event.key === "Enter") {
+        event.preventDefault();
         checkWord();
     }
 
     if (event.key === "Escape") {
+        event.preventDefault();
         openSettings();
     }
 });
 
 
-/* =========================================
+/* =====================================================
+   EVENT LISTENER HELPER
+   ===================================================== */
+
+function addClickListener(id, callback) {
+    const element = $(id);
+
+    if (element) {
+        element.addEventListener("click", callback);
+    }
+}
+
+
+/* =====================================================
    EVENT LISTENERS
-   ========================================= */
+   ===================================================== */
 
-$("start-game-btn").addEventListener("click", startGame);
+addClickListener("start-game-btn", startGame);
 
-$("check-word-btn").addEventListener("click", checkWord);
+addClickListener("check-word-btn", checkWord);
 
-$("reset-word-btn").addEventListener("click", resetWord);
+addClickListener("reset-word-btn", resetWord);
 
-$("hint-btn").addEventListener("click", useHint);
+addClickListener("hint-btn", useHint);
 
-$("settings-btn").addEventListener("click", openSettings);
+addClickListener("settings-btn", openSettings);
 
-$("close-settings-btn").addEventListener("click", closeSettings);
+addClickListener("close-settings-btn", closeSettings);
 
-$("resume-game-btn").addEventListener("click", closeSettings);
+addClickListener("resume-game-btn", closeSettings);
 
-$("restart-game-btn").addEventListener("click", restartCurrentLevel);
+addClickListener("restart-game-btn", restartCurrentLevel);
 
-$("settings-home-btn").addEventListener("click", goToMainMenu);
+addClickListener("settings-home-btn", goToMainMenu);
 
-$("next-level-btn").addEventListener("click", nextLevel);
+addClickListener("next-level-btn", nextLevel);
 
-$("success-home-btn").addEventListener("click", goToMainMenu);
+addClickListener("success-home-btn", goToMainMenu);
 
-$("success-retry-btn").addEventListener("click", retryLevel);
+addClickListener("success-retry-btn", retryLevel);
 
-$("try-again-btn").addEventListener("click", retryLevel);
+addClickListener("try-again-btn", retryLevel);
 
-$("game-over-home-btn").addEventListener("click", goToMainMenu);
+addClickListener("game-over-home-btn", goToMainMenu);
 
-$("close-info-btn").addEventListener("click", () => {
+addClickListener("close-info-btn", () => {
     hideOverlay("info-screen");
 });
 
-$("player-name").addEventListener("input", () => {
-    $("name-error").textContent = "";
-});
 
-$("player-name").addEventListener("keydown", event => {
-    if (event.key === "Enter") {
-        startGame();
-    }
-});
+/* =====================================================
+   PLAYER NAME INPUT
+   ===================================================== */
+
+const playerNameInput = $("player-name");
+
+if (playerNameInput) {
+    playerNameInput.addEventListener("input", () => {
+        if ($("name-error")) {
+            $("name-error").textContent = "";
+        }
+    });
+
+    playerNameInput.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+            startGame();
+        }
+    });
+}
+
+
+/* =====================================================
+   INFORMATION BUTTONS
+   ===================================================== */
 
 document.querySelectorAll("[data-info]").forEach(button => {
     button.addEventListener("click", () => {
@@ -938,10 +1266,12 @@ document.querySelectorAll("[data-info]").forEach(button => {
 });
 
 
-/* =========================================
+/* =====================================================
    INITIALIZE GAME
-   ========================================= */
+   ===================================================== */
 
-$("start-game-btn").disabled = true;
+if ($("start-game-btn")) {
+    $("start-game-btn").disabled = true;
+}
 
 loadLevels();
